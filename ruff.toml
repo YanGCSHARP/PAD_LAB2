@@ -1,0 +1,13 @@
+line-length = 160
+target-version = "py312"
+extend-exclude = ["libs/common/common/protos/*_pb2*.py", "libs/common/common/protos/*.pyi", "**/migrations/versions/*.py"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
+ignore = ["B008", "UP046"]  # Depends() in defaults is idiomatic FastAPI; Generic[T] kept for pydantic clarity
+
+[lint.isort]
+known-first-party = ["common", "app"]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["E501"]

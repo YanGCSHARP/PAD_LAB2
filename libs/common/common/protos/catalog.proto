@@ -1,0 +1,37 @@
+// Internal synchronous contract between booking-service (client) and catalog-service (server).
+// Regenerate Python stubs:  python scripts/gen_proto.py
+syntax = "proto3";
+
+package ticketing.catalog.v1;
+
+service CatalogReservation {
+  // Atomically reserves `quantity` tickets of a category for a booking. Idempotent by booking_id.
+  rpc ReserveTickets(ReserveTicketsRequest) returns (ReservationReply);
+  // Marks a reservation as sold (payment succeeded). Idempotent.
+  rpc ConfirmReservation(ReservationRef) returns (ReservationReply);
+  // Returns reserved tickets back to the pool (cancel / payment failed). Idempotent.
+  rpc ReleaseTickets(ReservationRef) returns (ReservationReply);
+}
+
+message ReserveTicketsRequest {
+  string booking_id = 1;
+  string category_id = 2;
+  int32 quantity = 3;
+}
+
+message ReservationRef {
+  string booking_id = 1;
+}
+
+message ReservationReply {
+  string booking_id = 1;
+  string event_id = 2;
+  string event_title = 3;
+  string category_id = 4;
+  string category_name = 5;
+  int32 quantity = 6;
+  string unit_price = 7;   // decimal as string, e.g. "450.00"
+  string total_price = 8;
+  string status = 9;       // reserved | confirmed | released
+  string starts_at = 10;   // ISO-8601
+}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ticketing — бронирование билетов</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🎟 Ticketing</div>
+  <nav>
+    <a href="#events" data-view="events" class="active">Афиша</a>
+    <a href="#bookings" data-view="bookings" class="auth-only">Мои брони</a>
+    <a href="#notifications" data-view="notifications" class="auth-only">Уведомления <span id="unread" class="badge hidden"></span></a>
+    <a href="#admin" data-view="admin" class="admin-only">Админ</a>
+    <a href="#status" data-view="status">Статус системы</a>
+    <a href="/docs" target="_blank">API docs ↗</a>
+  </nav>
+  <div id="session" class="session"></div>
+</header>
+
+<main>
+  <section id="auth-panel" class="card guest-only">
+    <div class="tabs">
+      <button class="tab active" data-tab="login">Вход</button>
+      <button class="tab" data-tab="register">Регистрация</button>
+    </div>
+    <form id="login-form" class="form">
+      <input name="email" type="email" placeholder="Email" required autocomplete="username">
+      <input name="password" type="password" placeholder="Пароль" required autocomplete="current-password">
+      <button type="submit">Войти</button>
+    </form>
+    <form id="register-form" class="form hidden">
+      <input name="full_name" placeholder="Имя и фамилия" required>
+      <input name="email" type="email" placeholder="Email" required autocomplete="username">
+      <input name="password" type="password" placeholder="Пароль (≥8, буквы и цифры)" required autocomplete="new-password">
+      <button type="submit">Создать аккаунт</button>
+    </form>
+  </section>
+
+  <section id="view-events" class="view">
+    <div class="toolbar">
+      <h2>Афиша</h2>
+      <input id="search" placeholder="Поиск по названию…">
+    </div>
+    <div id="events" class="grid"></div>
+  </section>
+
+  <section id="view-bookings" class="view hidden">
+    <div class="toolbar"><h2>Мои бронирования</h2><button id="refresh-bookings" class="ghost">Обновить</button></div>
+    <div id="bookings" class="list"></div>
+  </section>
+
+  <section id="view-notifications" class="view hidden">
+    <div class="toolbar"><h2>Уведомления</h2></div>
+    <div id="notifications" class="list"></div>
+  </section>
+
+  <section id="view-admin" class="view hidden">
+    <h2>Администрирование</h2>
+    <div class="columns">
+      <form id="venue-form" class="card form">
+        <h3>Новая площадка</h3>
+        <input name="name" placeholder="Название" required>
+        <input name="city" placeholder="Город" required>
+        <input name="address" placeholder="Адрес" required>
+        <input name="capacity" type="number" min="1" placeholder="Вместимость" required>
+        <button type="submit">Создать площадку</button>
+      </form>
+      <form id="event-form" class="card form">
+        <h3>Новое мероприятие</h3>
+        <select name="venue_id" id="venue-select" required></select>
+        <input name="title" placeholder="Название" required>
+        <textarea name="description" placeholder="Описание"></textarea>
+        <select name="category">
+          <option value="concert">Концерт</option><option value="theatre">Театр</option>
+          <option value="sport">Спорт</option><option value="festival">Фестиваль</option>
+          <option value="conference">Конференция</option><option value="other">Другое</option>
+        </select>
+        <input name="starts_at" type="datetime-local" required>
+        <textarea name="categories" placeholder="Категории билетов, по одной в строке: Название;Цена;Количество" required>Standard;300;100
+VIP;1500;10</textarea>
+        <button type="submit">Создать мероприятие</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="view-status" class="view hidden">
+    <div class="toolbar"><h2>Статус сервисов</h2><button id="refresh-status" class="ghost">Обновить</button></div>
+    <div id="status" class="grid small"></div>
+    <p class="muted">Мониторинг: <a href="http://localhost:3001" target="_blank">Grafana</a> ·
+      <a href="http://localhost:9090" target="_blank">Prometheus</a> ·
+      <a href="http://localhost:15672" target="_blank">RabbitMQ</a></p>
+  </section>
+</main>
+
+<dialog id="book-dialog">
+  <form id="book-form" method="dialog" class="form">
+    <h3 id="book-title"></h3>
+    <select name="category_id" id="book-category" required></select>
+    <input name="quantity" type="number" min="1" max="10" value="1" required>
+    <p id="book-total" class="muted"></p>
+    <div class="row">
+      <button type="button" class="ghost" id="book-cancel">Отмена</button>
+      <button type="submit" id="book-submit">Забронировать</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

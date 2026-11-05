@@ -1,0 +1,225 @@
+name: ticketing
+
+# Shared settings for every Python service
+x-service: &service
+  restart: unless-stopped
+  environment: &service-env
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ENVIRONMENT: ${ENVIRONMENT:-dev}
+    RABBITMQ_URL: amqp://${RABBITMQ_USER:-ticketing}:${RABBITMQ_PASSWORD:-ticketing}@rabbitmq:5672/
+    JWKS_URL: http://auth-service:8000/api/auth/.well-known/jwks.json
+  networks: [backend]
+
+x-postgres: &postgres
+  image: postgres:16-alpine
+  restart: unless-stopped
+  networks: [backend]
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+services:
+  # ---------------------------------------------------------------- infrastructure
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ticketing}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ticketing}
+    ports:
+      - "15672:15672"   # management UI
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-db:
+    <<: *postgres
+    environment: {POSTGRES_DB: auth, POSTGRES_USER: auth, POSTGRES_PASSWORD: "${AUTH_DB_PASSWORD:-auth}"}
+    volumes: [auth-db:/var/lib/postgresql/data]
+
+  user-db:
+    <<: *postgres
+    environment: {POSTGRES_DB: users, POSTGRES_USER: users, POSTGRES_PASSWORD: "${USER_DB_PASSWORD:-users}"}
+    volumes: [user-db:/var/lib/postgresql/data]
+
+  catalog-db:
+    <<: *postgres
+    environment: {POSTGRES_DB: catalog, POSTGRES_USER: catalog, POSTGRES_PASSWORD: "${CATALOG_DB_PASSWORD:-catalog}"}
+    volumes: [catalog-db:/var/lib/postgresql/data]
+
+  booking-db:
+    <<: *postgres
+    environment: {POSTGRES_DB: booking, POSTGRES_USER: booking, POSTGRES_PASSWORD: "${BOOKING_DB_PASSWORD:-booking}"}
+    volumes: [booking-db:/var/lib/postgresql/data]
+
+  payment-db:
+    <<: *postgres
+    environment: {POSTGRES_DB: payment, POSTGRES_USER: payment, POSTGRES_PASSWORD: "${PAYMENT_DB_PASSWORD:-payment}"}
+    volumes: [payment-db:/var/lib/postgresql/data]
+
+  notification-db:
+    image: mongo:7
+    restart: unless-stopped
+    networks: [backend]
+    volumes: [notification-db:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------- business services
+  auth-service:
+    <<: *service
+    build: {context: ., dockerfile: services/auth-service/Dockerfile}
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+asyncpg://auth:${AUTH_DB_PASSWORD:-auth}@auth-db:5432/auth
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@ticketing.io}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345}
+      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+    volumes: [auth-keys:/data/keys]
+    ports: ["8001:8000"]
+    depends_on:
+      auth-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  user-service:
+    <<: *service
+    build: {context: ., dockerfile: services/user-service/Dockerfile}
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+asyncpg://users:${USER_DB_PASSWORD:-users}@user-db:5432/users
+    ports: ["8002:8000"]
+    depends_on:
+      user-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  catalog-service:
+    <<: *service
+    build: {context: ., dockerfile: services/catalog-service/Dockerfile}
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+asyncpg://catalog:${CATALOG_DB_PASSWORD:-catalog}@catalog-db:5432/catalog
+      GRPC_PORT: "50051"
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    ports: ["8003:8000"]
+    depends_on:
+      catalog-db: {condition: service_healthy}
+
+  booking-service:
+    <<: *service
+    build: {context: ., dockerfile: services/booking-service/Dockerfile}
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+asyncpg://booking:${BOOKING_DB_PASSWORD:-booking}@booking-db:5432/booking
+      CATALOG_GRPC_TARGET: catalog-service:50051
+    ports: ["8004:8000"]
+    depends_on:
+      booking-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      catalog-service: {condition: service_started}
+
+  payment-service:
+    <<: *service
+    build: {context: ., dockerfile: services/payment-service/Dockerfile}
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+asyncpg://payment:${PAYMENT_DB_PASSWORD:-payment}@payment-db:5432/payment
+      DECLINE_ABOVE_AMOUNT: ${DECLINE_ABOVE_AMOUNT:-10000}
+      PROVIDER_LATENCY_MS: ${PROVIDER_LATENCY_MS:-500}
+    ports: ["8005:8000"]
+    depends_on:
+      payment-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  notification-service:
+    <<: *service
+    build: {context: ., dockerfile: services/notification-service/Dockerfile}
+    environment:
+      <<: *service-env
+      MONGO_URL: mongodb://notification-db:27017
+      MONGO_DB: notifications
+    ports: ["8006:8000"]
+    depends_on:
+      notification-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  # ---------------------------------------------------------------- edge
+  gateway:
+    <<: *service
+    build: {context: ., dockerfile: gateway/Dockerfile}
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
+      LOGIN_RATE_LIMIT_PER_MINUTE: ${LOGIN_RATE_LIMIT_PER_MINUTE:-20}
+      CORS_ORIGINS: http://localhost:3000
+    ports: ["8080:8000"]
+    networks: [backend, frontend]
+    depends_on:
+      redis: {condition: service_healthy}
+      auth-service: {condition: service_healthy}
+
+  frontend:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/public:/usr/share/nginx/html:ro
+    ports: ["3000:80"]
+    networks: [frontend]
+    depends_on: [gateway]
+
+  # ---------------------------------------------------------------- monitoring
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ticketing.json
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    networks: [backend]
+    depends_on: [prometheus]
+
+networks:
+  backend:
+  frontend:
+
+volumes:
+  auth-db:
+  user-db:
+  catalog-db:
+  booking-db:
+  payment-db:
+  notification-db:
+  auth-keys:

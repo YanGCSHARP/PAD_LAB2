@@ -1,0 +1,70 @@
+### Ticketing API — sample requests (VS Code REST Client / JetBrains HTTP client)
+@gw = http://localhost:8080
+@email = demo-user@example.com
+@password = Passw0rd123
+
+### Health of every service
+GET {{gw}}/api/status
+
+### Register
+POST {{gw}}/api/auth/register
+Content-Type: application/json
+
+{"email": "{{email}}", "password": "{{password}}", "full_name": "Demo User"}
+
+### Login
+# @name login
+POST {{gw}}/api/auth/login
+Content-Type: application/json
+
+{"email": "{{email}}", "password": "{{password}}"}
+
+@token = {{login.response.body.access_token}}
+
+### My profile (created asynchronously from user.registered)
+GET {{gw}}/api/users/me
+Authorization: Bearer {{token}}
+
+### Events
+# @name events
+GET {{gw}}/api/events?city=Chisinau
+
+@category = {{events.response.body.items[0].ticket_categories[0].id}}
+
+### Book tickets
+# @name booking
+POST {{gw}}/api/bookings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: demo-1
+
+{"category_id": "{{category}}", "quantity": 2}
+
+### Booking status (PENDING_PAYMENT -> CONFIRMED)
+GET {{gw}}/api/bookings/{{booking.response.body.id}}
+Authorization: Bearer {{token}}
+
+### Payment of the booking
+GET {{gw}}/api/payments/booking/{{booking.response.body.id}}
+Authorization: Bearer {{token}}
+
+### Notifications
+GET {{gw}}/api/notifications
+Authorization: Bearer {{token}}
+
+### Aggregated dashboard
+GET {{gw}}/api/dashboard
+Authorization: Bearer {{token}}
+
+### Cancel booking (tickets released, payment refunded)
+POST {{gw}}/api/bookings/{{booking.response.body.id}}/cancel
+Authorization: Bearer {{token}}
+
+### Error examples
+GET {{gw}}/api/bookings
+
+###
+POST {{gw}}/api/auth/register
+Content-Type: application/json
+
+{"email": "bad", "password": "1", "full_name": ""}
